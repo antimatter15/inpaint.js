@@ -1,3 +1,8 @@
+// This file isn't very well documented, but that shouldn't be a huge problem
+// because most of this is a fairly straightforward port of the scikit-image
+// implementation which can be found in 
+// https://github.com/chintak/scikit-image/blob/inpaint/skimage/filter/_inpaint_fmm.pyx
+
 function InpaintTelea(image, mask, radius){
 	if(!radius) radius = 5;
 
@@ -5,20 +10,20 @@ function InpaintTelea(image, mask, radius){
 	var SMALL_VALUE = 1e-6;
 
 	var outside = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.U8C1_t);
+	var flag = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.U8C1_t);
+	var u = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.F32_t | jsfeat.C1_t);
+
 	for(var i = 0; i < mask.data.length; i++){
 		if(!mask.data[i]) continue;
+		// this is the equivalent of doing a morphological dilation with
+		// a 1-pixel cross structuring element
 		outside.data[i + 1] = outside.data[i] = outside.data[i - 1] = outside.data[i + outside.cols] = outside.data[i - outside.cols] = 1
 	}
 	
-	var flag = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.U8C1_t);
-
-	var u = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.F32_t | jsfeat.C1_t);
-	
 	for(var i = 0; i < mask.data.length; i++){
 		flag.data[i] = (outside.data[i] * 2) - (mask.data[i] ^ outside.data[i])
-		if(flag.data[i] == 2){ // unknown points
-			u.data[i] = LARGE_VALUE
-		}
+		if(flag.data[i] == 2) // UNKNOWN
+			u.data[i] = LARGE_VALUE;
 	}
 
 	function eikonal(n1, n2){
@@ -45,10 +50,7 @@ function InpaintTelea(image, mask, radius){
 		return LARGE_VALUE
 	}
 
-
-
 	function inpaint_point(n){
-		// console.log('inpaint')
 		var h = flag.rows, w = flag.cols;
 		var Ia = 0, Jx = 0, Jy = 0, norm = 0;
 		var gradx_u = grad_func(u, n, 1),
@@ -103,17 +105,17 @@ function InpaintTelea(image, mask, radius){
 		}
 	}
 
-	var heap = new PriorityQueue({ comparator: function(a, b){
+	var heap = new HeapQueue(function(a, b){
 		return a[0] - b[0] // sort by first thingy
-	} })
+	})
 	
 	for(var i = 0; i < mask.data.length; i++){
-		if(flag.data[i] == 1){ // band
-			heap.queue([u.data[i], i])
-		}
+		if(flag.data[i] == 1) // BAND
+			heap.push([u.data[i], i]);
 	}
 	
 	var indices_centered = []
+	// generate a mask for a circular structuring element
 	for(var i = -radius; i <= radius; i++){
 		var h = Math.floor(Math.sqrt(radius * radius - i * i))
 		for(var j = -h; j <= h; j++)
@@ -121,14 +123,14 @@ function InpaintTelea(image, mask, radius){
 	}
 
 	while(heap.length){
-		var n = heap.dequeue()[1];
+		var n = heap.pop()[1];
 		var i = n % mask.cols,
 			j = Math.floor(n / mask.cols);
 		
 		flag.data[n] = 0; // KNOWN
 
-		if(i <= 1 || j <= 1 || i >= mask.cols - 2 || j >= mask.rows - 2) continue;
-		// console.log(n)
+		if(i <= 1 || j <= 1 || i >= mask.cols - 1 || j >= mask.rows - 1) continue;
+
 		for(var k = 0; k < 4; k++){
 			var nb = n + [-mask.cols, -1, mask.cols, 1][k];
 			if(flag.data[nb] != 0){ // not KNOWN
@@ -140,7 +142,7 @@ function InpaintTelea(image, mask, radius){
 
 				if(flag.data[nb] == 2){ // UNKNOWN
 					flag.data[nb] = 1; // BAND
-					heap.queue([u.data[nb], nb])
+					heap.push([u.data[nb], nb])
 					inpaint_point(nb)
 				}
 			}
