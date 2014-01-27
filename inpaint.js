@@ -74,11 +74,12 @@ function InpaintTelea(image, mask, radius){
 
 			var geometric_dst = 1 / ((rx * rx + ry * ry) * Math.sqrt(rx * rx + ry * ry))
 			var levelset_dst = 1 / (1 + Math.abs(u.data[nb] - u.data[n]))
-			var direction = Math.abs(rx * gradx_u + ry * grady_u) + SMALL_VALUE;
-			var weight = geometric_dst * levelset_dst * direction;
-			var gradx_img = grad_func(image, nb, 1),
-				grady_img = grad_func(image, nb, flag.cols);
+			var direction = Math.abs(rx * gradx_u + ry * grady_u);
+			var weight = geometric_dst * levelset_dst * direction + SMALL_VALUE;
 			
+			var gradx_img = grad_func(image, nb, 1) + SMALL_VALUE,
+				grady_img = grad_func(image, nb, flag.cols) + SMALL_VALUE;
+				
 			Ia += weight * image.data[nb]
 			Jx -= weight * gradx_img * rx
 			Jy -= weight * grady_img * ry
