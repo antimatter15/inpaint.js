@@ -63,10 +63,8 @@ HeapQueue.prototype.peek = function(){
 }
 HeapQueue.prototype.push = function(value){
 	this.data.push(value);
-
 	var pos = this.data.length - 1,
 		parent, x;
-
 	while(pos > 0){
 		parent = (pos - 1) >>> 1;
 		if(this.cmp(this.data[pos], this.data[parent]) < 0){

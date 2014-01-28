@@ -17,7 +17,7 @@ function blah(merp){
 		var Y = .299 * blah.data[4 * i] + .587 * blah.data[4 * i + 1] +  .114 * blah.data[4 * i + 2];
 
 		if(Y > 230){
-			var rad = 10
+			var rad = 6
 
 			for(var dx = -rad; dx <= rad; dx++){
 				for(var dy = -rad; dy <= rad; dy++){
@@ -32,13 +32,13 @@ function blah(merp){
 		}
 	}
 	for(var channel = 0; channel < 3; channel++){
-		var img_u8 = new Float32Array(width * height)
+		var img_u8 = new Uint8Array(width * height)
 		for(var n = 0; n < blah.data.length; n+=4){
-			img_u8[n / 4] = blah.data[n + channel] / 1
+			img_u8[n / 4] = blah.data[n + channel]
 		}
 		InpaintTelea(width, height, img_u8, mask_u8)
 		for(var i = 0; i < img_u8.length; i++){
-			blah.data[4 * i + channel] = img_u8[i] * 1
+			blah.data[4 * i + channel] = img_u8[i]
 		}	
 	}
 
