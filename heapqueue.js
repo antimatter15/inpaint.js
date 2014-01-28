@@ -79,8 +79,9 @@ HeapQueue.prototype.push = function(value){
 	return ++this.length;
 }
 HeapQueue.prototype.pop = function(){
-	var last_val = this.data.pop(),
-		ret = this.data[0];
+	var ret = this.data[0],
+		last_val = this.data.pop();
+	this.length--;
 	if(this.data.length > 0){
 		this.data[0] = last_val;
 		var pos = 0,

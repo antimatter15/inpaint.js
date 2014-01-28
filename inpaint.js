@@ -3,116 +3,35 @@
 // implementation which can be found in 
 // https://github.com/chintak/scikit-image/blob/inpaint/skimage/filter/_inpaint_fmm.pyx
 
-function InpaintTelea(image, mask, radius){
+function InpaintTelea(width, height, image, mask, radius){
 	if(!radius) radius = 5;
 
 	var LARGE_VALUE = 1e6;
 	var SMALL_VALUE = 1e-6;
 
-	var outside = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.U8C1_t);
-	var flag = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.U8C1_t);
-	var u = new jsfeat.matrix_t(mask.cols, mask.rows, jsfeat.F32_t | jsfeat.C1_t);
-
-	for(var i = 0; i < mask.data.length; i++){
-		if(!mask.data[i]) continue;
+	var size = width * height;
+	var flag = new Uint8Array(size);
+	var u = new Float32Array(size);
+	
+	for(var i = 0; i < size; i++){
+		if(!mask[i]) continue;
 		// this is the equivalent of doing a morphological dilation with
-		// a 1-pixel cross structuring element
-		outside.data[i + 1] = outside.data[i] = outside.data[i - 1] = outside.data[i + outside.cols] = outside.data[i - outside.cols] = 1
+		// a 1-pixel cross structuring element for first pass through flag
+		flag[i + 1] = flag[i] = flag[i - 1] = flag[i + width] = flag[i - width] = 1;
 	}
 	
-	for(var i = 0; i < mask.data.length; i++){
-		flag.data[i] = (outside.data[i] * 2) - (mask.data[i] ^ outside.data[i])
-		if(flag.data[i] == 2) // UNKNOWN
-			u.data[i] = LARGE_VALUE;
-	}
-
-	function eikonal(n1, n2){
-		var u1 = u.data[n1],
-			u2 = u.data[n2];
-		if(flag.data[n1] == 0 /*KNOWN*/){
-			if(flag.data[n2] == 0 /*KNOWN*/){
-				var perp = Math.sqrt(2 - Math.pow(u1 - u2, 2)); // perpendicular distance
-				var s = (u1 + u2 - perp) * 0.5; // average distance
-				if(s >= u1 && s >= u2){
-					return s;
-				}else{
-					s += perp;
-					if(s >= u1 && s >= u2){
-						return s;
-					}
-				}
-			}else{
-				return 1 + u1
-			}
-		}else if(flag.data[n2] == 0 /*KNOWN*/){
-			return 1 + u2;
-		}
-		return LARGE_VALUE
-	}
-
-	function inpaint_point(n){
-		var h = flag.rows, w = flag.cols;
-		var Ia = 0, Jx = 0, Jy = 0, norm = 0;
-		var gradx_u = grad_func(u, n, 1),
-			grady_u = grad_func(u, n, flag.cols); 
-		
-		var i = n % flag.cols,
-			j = Math.floor(n / flag.cols);
-
-
-		for(var k = 0; k < indices_centered.length; k++){
-			var nb = n + indices_centered[k];
-			var i_nb = nb % flag.cols,
-				j_nb = Math.floor(nb / flag.cols);
-
-			if(i_nb <= 1 || j_nb <= 1 || i_nb >= w - 1 || j_nb >= h - 1) continue;
-
-			if(flag.data[nb] != 0 /*KNOWN*/) continue; 
-
-			var rx = i - i_nb,
-				ry = j - j_nb;
-
-			var geometric_dst = 1 / ((rx * rx + ry * ry) * Math.sqrt(rx * rx + ry * ry))
-			var levelset_dst = 1 / (1 + Math.abs(u.data[nb] - u.data[n]))
-			var direction = Math.abs(rx * gradx_u + ry * grady_u);
-			var weight = geometric_dst * levelset_dst * direction + SMALL_VALUE;
-			
-			var gradx_img = grad_func(image, nb, 1) + SMALL_VALUE,
-				grady_img = grad_func(image, nb, flag.cols) + SMALL_VALUE;
-				
-			Ia += weight * image.data[nb]
-			Jx -= weight * gradx_img * rx
-			Jy -= weight * grady_img * ry
-			norm += weight
-			
-		}
-		image.data[n] = Ia / norm + (Jx + Jy) / Math.sqrt(Jx * Jx + Jy * Jy);			
+	for(var i = 0; i < size; i++){
+		flag[i] = (flag[i] * 2) - (mask[i] ^ flag[i])
+		if(flag[i] == 2) // UNKNOWN
+			u[i] = LARGE_VALUE;
 	}
 
 
-	function grad_func(array, n, step){
-		if(flag.data[n + step] != 2 /* UNKNOWN */){
-			if(flag.data[n - step] != 2){
-				return array.data[n + step] - array.data[n - step] * 0.5
-			}else{
-				return array.data[n + step] - array.data[n]
-			}
-		}else{
-			if(flag.data[n - step] != 2){
-				return array.data[n] - array.data[n - step]
-			}else{
-				return 0
-			}
-		}
-	}
-
-	var heap = new HeapQueue(function(a, b){
-		return a[0] - b[0] // sort by first thingy
-	})
+	var heap = new HeapQueue(function(a, b){ return a[0] - b[0] }) // sort by first thingy
 	
-	for(var i = 0; i < mask.data.length; i++){
-		if(flag.data[i] == 1) // BAND
-			heap.push([u.data[i], i]);
+	for(var i = 0; i < size; i++){
+		if(flag[i] == 1) // BAND
+			heap.push([u[i], i]);
 	}
 	
 	var indices_centered = []
@@ -120,36 +39,373 @@ function InpaintTelea(image, mask, radius){
 	for(var i = -radius; i <= radius; i++){
 		var h = Math.floor(Math.sqrt(radius * radius - i * i))
 		for(var j = -h; j <= h; j++)
-			indices_centered.push(i + j * flag.cols);
+			indices_centered.push(i + j * width);
 	}
+
+	// function eikonal(n1, n2){
+	// 	var u1 = u[n1],
+	// 		u2 = u[n2];
+	// 	if(flag[n1] == 0 /*KNOWN*/){
+	// 		if(flag[n2] == 0 /*KNOWN*/){
+	// 			var perp = Math.sqrt(2 - Math.pow(u1 - u2, 2)); // perpendicular distance
+	// 			var s = (u1 + u2 - perp) * 0.5; // average distance
+	// 			if(s >= u1 && s >= u2) return s;
+	// 			s += perp;
+	// 			if(s >= u1 && s >= u2) return s;
+	// 		}else{
+	// 			return 1 + u1
+	// 		}
+	// 	}else if(flag[n2] == 0 /*KNOWN*/){
+	// 		return 1 + u2;
+	// 	}
+	// 	return LARGE_VALUE
+	// }
+
+	function eikonal(n1, n2){
+		var u_out = LARGE_VALUE,
+			u1 = u[n1],
+			u2 = u[n2];
+		if(flag[n1] == 0){
+			if(flag[n2] == 0){
+				var perp = Math.sqrt(2 - (u1 - u2) * (u1 - u2));
+				var s = (u1 + u2 - perp) * 0.5;
+				if(s >= u1 && s >= u2){
+					u_out = s
+				}else{
+					s += perp;
+					if(s >= u1 && s >= u2){
+						u_out = s;
+					}
+				}
+			}else{
+				u_out = 1 + u1
+			}
+		}else if(flag[n2] == 0){
+			u_out = 1 + u2
+		}
+		return u_out
+	}
+
+	function inpaint_point(n){
+		var Ia = 0, Jx = 0, Jy = 0, norm = 0;
+		var gradx_u = grad_func(u, n, 1),
+			grady_u = grad_func(u, n, width); 
+		
+		var i = n % width,
+			j = Math.floor(n / width);
+
+
+		for(var k = 0; k < indices_centered.length; k++){
+			var nb = n + indices_centered[k];
+			var i_nb = nb % width,
+				j_nb = Math.floor(nb / width);
+
+			if(i_nb <= 1 || j_nb <= 1 || i_nb >= width - 1 || j_nb >= height - 1) continue;
+
+			if(flag[nb] != 0 /*KNOWN*/) continue; 
+
+			var rx = i - i_nb,
+				ry = j - j_nb;
+
+			var geometric_dst = 1 / ((rx * rx + ry * ry) * Math.sqrt(rx * rx + ry * ry))
+			var levelset_dst = 1 / (1 + Math.abs(u[nb] - u[n]))
+			var direction = Math.abs(rx * gradx_u + ry * grady_u);
+			var weight = geometric_dst * levelset_dst * direction + SMALL_VALUE;
+			
+			var gradx_img = grad_func(image, nb, 1) + SMALL_VALUE,
+				grady_img = grad_func(image, nb, width) + SMALL_VALUE;
+				
+			Ia += weight * image[nb]
+			Jx -= weight * gradx_img * rx
+			Jy -= weight * grady_img * ry
+			norm += weight
+			
+		}
+		// sat = Ia/s + (Jx+Jy)/(sqrt(Jx*Jx+Jy*Jy)+1.0e-20f) + 0.5f ;
+		// image[n] = Ia / norm + (Jx + Jy) / (Math.sqrt(Jx * Jx + Jy * Jy) + 1e-10) + 0.5;			
+		// console.log(Jx + Jy)
+		image[n] = Ia / norm + (Jx + Jy) / Math.sqrt(Jx * Jx + Jy * Jy);			
+	}
+
+	// this is meant to return the x-gradient
+	function grad_func(array, n, step){
+		if(flag[n + step] != 2 /* UNKNOWN */){
+			if(flag[n - step] != 2){
+				return (array[n + step] - array[n - step]) * 0.5
+			}else{
+				return array[n + step] - array[n]
+			}
+		}else{
+			if(flag[n - step] != 2){
+				return array[n] - array[n - step]
+			}else{
+				return 0
+			}
+		}
+	}
+
 
 	while(heap.length){
 		var n = heap.pop()[1];
-		var i = n % mask.cols,
-			j = Math.floor(n / mask.cols);
-		
-		flag.data[n] = 0; // KNOWN
-
-		if(i <= 1 || j <= 1 || i >= mask.cols - 1 || j >= mask.rows - 1) continue;
-
+		var i = n % width,
+			j = Math.floor(n / width);
+		flag[n] = 0; // KNOWN
+		if(i <= 1 || j <= 1 || i >= width - 1 || j >= height - 1) continue;
 		for(var k = 0; k < 4; k++){
-			var nb = n + [-mask.cols, -1, mask.cols, 1][k];
-			if(flag.data[nb] != 0){ // not KNOWN
-
-				u.data[nb] = Math.min(eikonal(nb - mask.cols, nb - 1),
-                                      eikonal(nb + mask.cols, nb - 1),
-                                      eikonal(nb - mask.cols, nb + 1),
-                                      eikonal(nb + mask.cols, nb + 1))
-
-				if(flag.data[nb] == 2){ // UNKNOWN
-					flag.data[nb] = 1; // BAND
-					heap.push([u.data[nb], nb])
+			var nb = n + [-width, -1, width, 1][k];
+			if(flag[nb] != 0){ // not KNOWN
+				u[nb] = Math.min(eikonal(nb - width, nb - 1),
+                                 eikonal(nb + width, nb - 1),
+                                 eikonal(nb - width, nb + 1),
+                                 eikonal(nb + width, nb + 1))
+				// u[nb] = Math.min(eikonal(nb - 1, nb - width),
+    //                              eikonal(nb + 1, nb - width),
+    //                              eikonal(nb - 1, nb + width),
+    //                              eikonal(nb + 1, nb + width))
+				if(flag[nb] == 2){ // UNKNOWN
+					flag[nb] = 1; // BAND
+					heap.push([u[nb], nb])
 					inpaint_point(nb)
 				}
 			}
 		}
 	}
+	return image;
 }
 
 
+function InpaintTelea2(width, height, image, mask, radius){
+	if(!radius) radius = 5;
+
+	var LARGE_VALUE = 1e6;
+	var SMALL_VALUE = 1e-6;
+
+	var size = width * height;
+	var flag = new Uint8Array(size);
+	var u = new Float32Array(size);
+	
+	for(var n = 0; n < size; n++){
+		if(!mask[n]) continue;
+		// this is the equivalent of doing a morphological dilation with
+		// a 1-pixel cross structuring element for first pass through flag
+		flag[n + 1] = flag[n] = flag[n - 1] = flag[n + width] = flag[n - width] = 1;
+	}
+	
+	for(var n = 0; n < size; n++){
+		flag[n] = (flag[n] * 2) - (mask[n] ^ flag[n])
+		if(flag[n] == 2) // UNKNOWN
+			u[n] = LARGE_VALUE;
+	}
+
+
+	var heap = new HeapQueue(function(a, b){ return a[0] - b[0] }) // sort by first thingy
+	
+	for(var n = 0; n < size; n++){
+		if(flag[n] == 1) // BAND
+			heap.push([u[n], n]);
+	}
+	
+	var indices_centered = []
+	// generate a mask for a circular structuring element
+	for(var j = -radius; j <= radius; j++){
+		var h = Math.floor(Math.sqrt(radius * radius - j * j))
+		for(var i = -h; i <= h; i++)
+			indices_centered.push(i + j * width);
+	}
+
+	// this is meant to return the x-gradient
+	// function grad_func(array, n, step){
+	// 	if(flag[n + step] != 2 /* UNKNOWN */){
+	// 		if(flag[n - step] != 2){
+	// 			return array[n + step] - array[n - step] * 0.5
+	// 		}else{
+	// 			return array[n + step] - array[n]
+	// 		}
+	// 	}else{
+	// 		if(flag[n - step] != 2){
+	// 			return array[n] - array[n - step]
+	// 		}else{
+	// 			return 0
+	// 		}
+	// 	}
+	// }
+
+	function inpaint_point2(n){
+		var Ia = 0, Jx = 0, Jy = 0, s = 1.0e-20;
+		
+		var t = u, f = flag;
+
+		if(f[n + 1] != 2){
+			if(f[n - 1] != 2){
+				gradTX = (t[n + 1] - t[n - 1]) * 0.5
+			}else{
+				gradTX = t[n + 1] - t[n]
+			}
+		}else{
+			if(f[n - 1] != 2){
+				gradTX = t[n] - t[n - 1]
+			}else{
+				gradTX = 0
+			}
+		}
+		if(f[n + width] != 2){
+			if(f[n - width] != 2){
+				gradTY = (t[n + width] - t[n - width]) * 0.5
+			}else{
+				gradTY = t[n + width] - t[n]
+			}
+		}else{
+			if(f[n - width] != 2){
+				gradTY = t[n] - t[n - width]
+			}else{
+				gradTY = 0
+			}
+		}
+
+
+		var i = Math.floor(n / width),
+			j = n % width;
+
+		for(var ck = 0; ck < indices_centered.length; ck++){
+			var nb = n + indices_centered[ck];
+
+			var k = Math.floor(nb / width),
+				l = nb % width;
+			var ry = j - k,
+				rx = j - l;
+
+			var nm = nb; // less by one for some reason i dont know
+
+			// var dst = 1 / Math.pow(rx * rx + ry * ry, )
+			var dst = 1 / ((rx * rx + ry * ry) * Math.sqrt(rx * rx + ry * ry));
+			var lev = 1 / (1 + Math.abs(t[nb] - t[n]))
+			var dir = rx * gradTX + ry * gradTY;
+			if(Math.abs(dir) <= 0.01) dir = 0.000001;
+			var w = Math.abs(dst * lev * dir)
+
+			if(f[nb + 1] != 2){
+				if(f[nb - 1] != 2){
+					gradIX = (image[nm + 1] - image[nm - 1]) * 2;
+				}else{
+					gradIX = image[nm + 1] - image[nm]
+				}
+			}else{
+				if(f[nb - 1] != 2){
+					gradIX = image[nm] - image[nm - 1]
+				}else{
+					gradIX = 0
+				}
+			}
+			if(f[nb + width] != 2){
+				if(f[nb - width] != 2){
+					gradIY = (image[nm + width] - image[nm - width]) * 2
+				}else{
+					gradIY = image[nm + width] - image[nm]
+				}
+			}else{
+				if(f[nb - width] != 2){
+					gradIY = image[nm] - image[nm - width]
+				}else{
+					gradIY = 0
+				}
+			}
+
+			Ia += w * image[nm]
+			Jx -= w * gradIX * rx;
+			Jy -= w * gradIY * ry;
+			s += w;
+		}	
+
+		image[n] = Ia / s + (Jx + Jy)/(Math.sqrt(Jx * Jx + Jy * Jy) + 1e-20) + 0.5;
+
+	}
+	// function inpaint_point(n){
+	// 	var Ia = 0, Jx = 0, Jy = 0, norm = 0;
+	// 	var gradx_u = grad_func(u, n, 1),
+	// 		grady_u = grad_func(u, n, width); 
+		
+	// 	var i = n % width,
+	// 		j = Math.floor(n / width);
+
+
+	// 	for(var k = 0; k < indices_centered.length; k++){
+	// 		var nb = n + indices_centered[k];
+	// 		var i_nb = nb % width,
+	// 			j_nb = Math.floor(nb / width);
+
+	// 		if(i_nb <= 1 || j_nb <= 1 || i_nb >= width - 1 || j_nb >= height - 1) continue;
+
+	// 		if(flag[nb] != 0 /*KNOWN*/) continue; 
+
+	// 		var rx =  i - i_nb,
+	// 			ry = j - j_nb;
+
+	// 		var geometric_dst = 1 / ((rx * rx + ry * ry) * Math.sqrt(rx * rx + ry * ry))
+	// 		var levelset_dst = 1 / (1 + Math.abs(u[nb] - u[n]))
+	// 		var direction = Math.abs(rx * gradx_u + ry * grady_u);
+	// 		var weight = geometric_dst * levelset_dst * direction + SMALL_VALUE;
+			
+	// 		var gradx_img = grad_func(image, nb, 1) + SMALL_VALUE,
+	// 			grady_img = grad_func(image, nb, width) + SMALL_VALUE;
+				
+	// 		Ia += weight * image[nb]
+	// 		Jx -= weight * gradx_img * rx
+	// 		Jy -= weight * grady_img * ry
+	// 		norm += weight
+			
+	// 	}
+	// 	// sat = Ia/s + (Jx+Jy)/(sqrt(Jx*Jx+Jy*Jy)+1.0e-20f) + 0.5f ;
+	// 	image[n] = Ia / norm //+ (Jx + Jy) / (Math.sqrt(Jx * Jx + Jy * Jy) + 1e-10) + 0.5;			
+	// }
+
+
+	function FastMarching_solve(n1, n2){
+		var t = u, f = flag;
+
+		var sol, 
+			a11 = t[n1], 
+			a22 = t[n2], 
+			m12 = Math.min(a11, a22);
+		if(f[n1] != 2 /*INSIDE*/){
+			if(f[n2] != 2){
+				if(Math.abs(a11 - a22) >= 1){
+					sol = 1 + m12
+				}else{
+					sol = (a11 + a22 + Math.sqrt(2 - (a11 - a22) * (a11 - a22))) * 0.5;
+				}
+			}else{
+				sol = 1 + a11;
+			}
+		}else if(f[n2] != 2){
+			sol = 1 + a22
+		}else{
+			sol = 1 + m12
+		}
+		return sol
+	}
+
+	while(heap.length){
+		var n = heap.pop()[1];
+		var j = n % width,
+			i = Math.floor(n / width);
+		flag[n] = 0; // KNOWN
+		if(i <= 1 || j <= 1 || i >= height - 1 || j >= width - 1) continue;
+
+		for(var k = 0; k < 4; k++){
+			var nb = n + [-width, -1, width, 1][k];
+			if(flag[nb] != 0){ // not KNOWN
+				u[nb] = Math.min(FastMarching_solve(nb - width, nb - 1),
+                                 FastMarching_solve(nb + width, nb - 1),
+                                 FastMarching_solve(nb - width, nb + 1),
+                                 FastMarching_solve(nb + width, nb + 1));
+				if(flag[nb] == 2){ // UNKNOWN
+					flag[nb] = 1; // BAND
+					heap.push([u[nb], nb])
+					inpaint_point2(nb)
+				}
+			}
+		}
+	}
+	return image;
+}
 

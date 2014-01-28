@@ -1,0 +1,57 @@
+
+<script type="text/javascript" src="inpaint.js"></script>
+<script type="text/javascript" src="heapqueue.js"></script>
+<script>
+function blah(merp){
+	var c = document.createElement('canvas')
+	c.width = merp.width;
+	c.height = merp.height;
+	document.body.appendChild(c)
+	var ctx = c.getContext('2d');
+	ctx.drawImage(merp, 0, 0)
+	var blah = ctx.getImageData(0, 0, c.width, c.height);
+
+	var width = blah.width, height = blah.height;
+	var mask_u8 = new Uint8Array(width * height);
+	for(var i = 0; i < blah.data.length / 4; i++){
+		var Y = .299 * blah.data[4 * i] + .587 * blah.data[4 * i + 1] +  .114 * blah.data[4 * i + 2];
+
+		if(Y > 230){
+			var rad = 10
+
+			for(var dx = -rad; dx <= rad; dx++){
+				for(var dy = -rad; dy <= rad; dy++){
+					if(dx * dx + dy * dy <= rad * rad){
+						mask_u8[i + dx + dy * width] = 1;
+					}
+				}
+			}
+			// blah.data[i * 4] = 0
+			// blah.data[i * 4 + 1] = 0
+			// blah.data[i * 4 + 2] = 0
+		}
+	}
+	for(var channel = 0; channel < 3; channel++){
+		var img_u8 = new Float32Array(width * height)
+		for(var n = 0; n < blah.data.length; n+=4){
+			img_u8[n / 4] = blah.data[n + channel] / 1
+		}
+		InpaintTelea(width, height, img_u8, mask_u8)
+		for(var i = 0; i < img_u8.length; i++){
+			blah.data[4 * i + channel] = img_u8[i] * 1
+		}	
+	}
+
+	
+	// render result back to canvas
+	for(var i = 0; i < img_u8.length; i++){
+		blah.data[4 * i + 3] = 255;
+	}
+    
+    ctx.putImageData(blah, 0, 0);
+
+}
+
+
+</script>
+<img src="skid.jpg" onload="blah(this)">
